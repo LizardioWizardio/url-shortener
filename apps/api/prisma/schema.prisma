@@ -1,0 +1,99 @@
+generator client {
+  provider        = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UrlStatus {
+  ACTIVE   // Активная ссылка
+  EXPIRED  // Истекла по времени или кликам
+  DELETED  // Удалена пользователем
+}
+
+enum DeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+  BOT      // Определенный бот
+  UNKNOWN
+}
+
+// Короткие URL ссылки
+model Url {
+  // Идентификация
+  id        String   @id @default(cuid())
+  shortCode String   @unique @db.VarChar(20) // 20 для custom aliases
+  
+  // Основные данные
+  originalUrl String  @db.Text
+  title       String? @db.VarChar(255)        // Опциональный title для UI
+  description String? @db.Text                // Опциональное описание
+  
+  // Метаданные
+  status    UrlStatus @default(ACTIVE)
+  createdAt DateTime  @default(now()) @db.Timestamp(3)
+  updatedAt DateTime  @updatedAt @db.Timestamp(3)
+  
+  // Ограничения
+  expiresAt DateTime? @db.Timestamp(3)        // Опциональная дата истечения
+  maxClicks Int?                              // Опциональный лимит кликов
+  
+  // Связи
+  clicks Click[]
+  
+  // Индексы
+  @@index([status, createdAt(sort: Desc)])   // Для фильтрации активных + сортировки
+  @@index([createdAt(sort: Desc)])           // Для списка всех URL
+  @@index([expiresAt])                       // Для поиска истекших
+  
+  @@map("urls")
+}
+
+/// Клики по коротким ссылкам с аналитикой
+model Click {
+  // Идентификация
+  id      String   @id @default(cuid())
+  urlId   String
+  url     Url      @relation(fields: [urlId], references: [id], onDelete: Cascade)
+  
+  // Временная метка
+  clickedAt DateTime @default(now()) @db.Timestamp(3)
+  
+  // Сетевая информация
+  ip        String  @db.Inet                  // PostgreSQL INET тип для IPv4/IPv6
+  
+  // User Agent (сырой)
+  userAgent String  @db.Text
+  
+  // Распарсенная информация из UA
+  deviceType   DeviceType @default(UNKNOWN)
+  browser      String?    @db.VarChar(50)     // "Chrome", "Firefox", "Safari"
+  browserVer   String?    @db.VarChar(20)     // "120.0.0"
+  os           String?    @db.VarChar(50)     // "Windows", "macOS", "Linux", "iOS"
+  osVer        String?    @db.VarChar(20)     // "10", "14.2"
+  
+  // Referrer и метаданные
+  referer   String? @db.Text
+  
+  // Bot detection
+  isBot     Boolean @default(false)           // true если подозрение на бота
+  botName   String? @db.VarChar(100)          // "Googlebot", "Bingbot" и т.д.
+  
+  // Геолокация (добавим позже)
+  // country   String? @db.Char(2)
+  // city      String? @db.VarChar(100)
+  // region    String? @db.VarChar(100)
+  // latitude  Float?
+  // longitude Float?
+  
+  // Составные индексы для аналитики
+  @@index([urlId, clickedAt(sort: Desc)])    // Главный - клики по URL
+  @@index([clickedAt(sort: Desc)])           // Временная статистика
+  @@index([urlId, deviceType])               // Группировка по устройствам
+  @@index([urlId, browser])                  // Группировка по браузерам
+  @@index([isBot])                           // Фильтрация ботов
+  
+  @@map("clicks")
+}
